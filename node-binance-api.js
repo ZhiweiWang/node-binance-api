@@ -814,13 +814,26 @@ let api = function Binance() {
 
         /**
         * rounds number with given step
-        * @param {float} number - number to round
-        * @param {float} stepSize - step size
+        * @param {float} qty - quantity to round
+        * @param {float} stepSize - stepSize as specified by exchangeInfo
         * @return {float} - number
         */
-        roundStep: function (number, stepSize) {
+        roundStep: function (qty, stepSize) {
             const precision = stepSize.toString().split('.')[1].length || 0;
-            return (((number / stepSize) | 0) * stepSize).toFixed(precision);
+            return (((qty / stepSize) | 0) * stepSize).toFixed(precision);
+        },
+        
+        /**
+        * rounds price to required precision
+        * @param {float} price - price to round
+        * @param {float} tickSize - tickSize as specified by exchangeInfo
+        * @return {float} - number
+        */
+        roundTicks: function (price, tickSize) {
+            const formatter = new Intl.NumberFormat('en-US', { style: 'decimal', minimumFractionDigits: 0, maximumFractionDigits: 8 });
+            const precision = formatter.format(tickSize).split('.')[1].length || 0;
+            if ( typeof price === 'string' ) price = parseFloat(price);
+            return price.toFixed(precision);
         },
 
         /**
@@ -1321,11 +1334,11 @@ let api = function Binance() {
         /**
         * Get the Withdraws history for a given asset
         * @param {function} callback - the callback function
-        * @param {string} asset - the asset symbol
+        * @param {object} params - supports limit and fromId parameters
         * @return {undefined}
         */
-        withdrawHistory: function (callback, asset = false) {
-            let params = asset ? { asset: asset } : {};
+        withdrawHistory: function (callback, params = {}) {
+            if (typeof params === 'string') params = { asset: params };
             signedRequest(wapi + 'v3/withdrawHistory.html', params, callback);
         },
 
@@ -1357,6 +1370,26 @@ let api = function Binance() {
         */
         accountStatus: function (callback) {
             signedRequest(wapi + 'v3/accountStatus.html', {}, callback);
+        },
+
+        /**
+        * Get the trade fee
+        * @param {function} callback - the callback function
+        * @param {string} symbol (optional)
+        * @return {undefined}
+        */
+        tradeFee: function (callback, symbol = false) {
+            let params = symbol ? {symbol:symbol} : {};
+            signedRequest(wapi + 'v3/tradeFee.html', params, callback);
+        },
+
+        /**
+        * Fetch asset detail (minWithdrawAmount, depositStatus, withdrawFee, withdrawStatus, depositTip)
+        * @param {function} callback - the callback function
+        * @return {undefined}
+        */
+        assetDetail: function (callback) {
+            signedRequest(wapi + 'v3/assetDetail.html', {}, callback);
         },
 
         /**
@@ -1735,7 +1768,7 @@ let api = function Binance() {
                         return symbol.toLowerCase() + '@depth';
                     });
                     subscription = subscribeCombined(streams, handleDepthStreamData, reconnect, function () {
-                        async.mapLimit(symbols, symbols.length, getSymbolDepthSnapshot, (err, results) => {
+                        async.mapLimit(symbols, 50, getSymbolDepthSnapshot, (err, results) => {
                             if (err) throw err;
                             results.forEach(updateSymbolDepthCache);
                         });
