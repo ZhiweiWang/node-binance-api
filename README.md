@@ -23,21 +23,7 @@ npm install node-binance-api --save
 const binance = require('node-binance-api')().options({
   APIKEY: '<key>',
   APISECRET: '<secret>',
-  useServerTime: true, // If you get timestamp errors, synchronize to server time at startup
-  test: true // If you want to use sandbox mode where orders are simulated
-});
-```
-
-#### Instantiating Multiple Instances
-```javascript
-const Binance = require('node-binance-api');
-
-const instance1 = new Binance().options({
-  // ...
-});
-
-const instance2 = new Binance().options({
-  // ...
+  useServerTime: true // If you get timestamp errors, synchronize to server time at startup
 });
 ```
 
@@ -125,9 +111,12 @@ binance.prices((error, ticker) => {
 #### Getting list of current balances
 ```javascript
 binance.balance((error, balances) => {
+  if ( error ) return console.error(error);
   console.log("balances()", balances);
   console.log("ETH balance: ", balances.ETH.available);
 });
+// If you have problems with this function,
+// see Troubleshooting at the bottom of this page.
 ```
 <details>
  <summary>View Response</summary>
@@ -1483,6 +1472,7 @@ binance.websockets.depthCache(['BNBBTC'], (symbol, depth) => {
   console.log("asks", asks);
   console.log("best bid: "+binance.first(bids));
   console.log("best ask: "+binance.first(asks));
+  console.log("last updated: " + new Date(depth.eventTime));
 });
 ```
 
@@ -1513,8 +1503,9 @@ bids { '0.00025203': 0.201624,
   '0.00025100': 0.02259,
   '0.00025072': 0.012536,
   '0.00025071': 0.00401136 }
-//ask: 0.00025400
-//bid: 0.00025203
+//best ask: 0.00025400
+//best bid: 0.00025203
+//last updated: Thu Apr 18 2019 00:52:49 GMT-0400 (Eastern Daylight Time)
 ```
 </details>
 
@@ -1621,7 +1612,7 @@ set socks_proxy=socks://ip:port
 ```
 
 ### Troubleshooting
-Verify that your system time is correct. If you have any suggestions don't hestitate to file an issue.
+Verify that your system time is correct. If you have any suggestions don't hesitate to file an issue.
 
 Having problems? Try adding `useServerTime` to your options or setting `recvWindow`:
 ```js
@@ -1637,6 +1628,20 @@ binance.options({
 });
 ```
 
+Problems getting your balance? Wrap the entry point of your application in useServerTime:
+```js
+binance.useServerTime(function() {
+	binance.balance((error, balances) => {
+		if ( error ) return console.error(error);
+		console.log("balances()", balances);
+		console.log("BNB balance: ", balances.BNB.available);
+	});
+});
+```
+
 [![Views](http://hits.dwyl.io/jaggedsoft/node-binance-api.svg)](http://hits.dwyl.io/jaggedsoft/node-binance-api)
 
 Thank you to all contributors: dmzoneill, dmitriz, keith1024, usama33, yanislk, learnathoner, vaielab, nickreese, Tuitio, grandmore, itnok, CollinEstes, sethyx, mstijak, MadDeveloper, balthazar, bitoiu, matthewwoop, robaleman, hems and others!
+
+> # ⚠️ Binance no longer offers support for API projects.
+> ## No support is offered. No questions will be answered.

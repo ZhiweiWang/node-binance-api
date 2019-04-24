@@ -123,7 +123,17 @@ let api = function Binance() {
             'X-MBX-APIKEY': key || ''
         }
     })
-
+    const reqObjPOST = (url, data = {}, method = 'POST', key) => ({
+        url: url,
+        form: data,
+        method: method,
+        timeout: Binance.options.recvWindow,
+        headers: {
+            'User-Agent': userAgent,
+            'Content-type': contentType,
+            'X-MBX-APIKEY': key || ''
+        }
+    })
     /**
      * Create a http request to the public API
      * @param {string} url - The http endpoint
@@ -198,14 +208,23 @@ let api = function Binance() {
             return a;
         }, []).join('&');
         let signature = crypto.createHmac('sha256', Binance.options.APISECRET).update(query).digest('hex'); // set the HMAC hash header
-
-        let opt = reqObj(
-            url + '?' + query + '&signature=' + signature,
-            data,
-            method,
-            Binance.options.APIKEY
-        );
-        proxyRequest(opt, callback);
+        if (method === 'POST') {
+            let opt = reqObjPOST(
+                url + '?signature=' + signature,
+                data,
+                method,
+                Binance.options.APIKEY
+            );
+            proxyRequest(opt, callback);
+        } else {
+            let opt = reqObj(
+                url + '?' + query + '&signature=' + signature,
+                data,
+                method,
+                Binance.options.APIKEY
+            );
+            proxyRequest(opt, callback);
+        }
     };
 
     /**
@@ -313,14 +332,14 @@ let api = function Binance() {
      */
     const handleSocketClose = function (reconnect, code, reason) {
         delete Binance.subscriptions[this.endpoint];
-        if (Object.keys(Binance.subscriptions).length === 0) {
+        if (Binance.subscriptions && Object.keys(Binance.subscriptions).length === 0) {
             clearInterval(Binance.socketHeartbeatInterval);
         }
         Binance.options.log('WebSocket closed: ' + this.endpoint +
             (code ? ' (' + code + ')' : '') +
             (reason ? ' ' + reason : ''));
         if (Binance.options.reconnect && this.reconnect && reconnect) {
-            if (parseInt(this.endpoint.length, 10) === 60) Binance.options.log('Account data WebSocket reconnecting...');
+            if (this.endpoint && parseInt(this.endpoint.length, 10) === 60) Binance.options.log('Account data WebSocket reconnecting...');
             else Binance.options.log('WebSocket reconnecting: ' + this.endpoint + '...');
             try {
                 reconnect();
@@ -336,7 +355,6 @@ let api = function Binance() {
      * @return {undefined}
      */
     const handleSocketError = function (error) {
-
         /* Errors ultimately result in a `close` event.
            see: https://github.com/websockets/ws/blob/828194044bf247af852b31c49e2800d557fedeff/lib/websocket.js#L126 */
         Binance.options.log('WebSocket error: ' + this.endpoint +
@@ -695,6 +713,7 @@ let api = function Binance() {
         let context = Binance.depthCacheContext[symbol];
 
         let updateDepthCache = function () {
+            Binance.depthCache[symbol].eventTime = depth.E;
             for (obj of depth.b) { //bids
                 Binance.depthCache[symbol].bids[obj[0]] = parseFloat(obj[1]);
                 if (obj[1] === '0.00000000') {
@@ -808,7 +827,8 @@ let api = function Binance() {
         * @param {float} float - get the price precision point
         * @return {int} - number of place
         */
-        getPrecision: function (float) { //
+        getPrecision: function (float) {
+            if ( !float || Number.isInteger( float ) ) return 0;
             return float.toString().split('.')[1].length || 0;
         },
 
@@ -819,10 +839,14 @@ let api = function Binance() {
         * @return {float} - number
         */
         roundStep: function (qty, stepSize) {
-            const precision = stepSize.toString().split('.')[1].length || 0;
-            return (((qty / stepSize) | 0) * stepSize).toFixed(precision);
+            // Integers do not require rounding
+            if (Number.isInteger(qty)) return qty;
+            const qtyString = qty.toFixed(16);
+            const desiredDecimals = Math.max(stepSize.indexOf('1') - 1, 0);
+            const decimalIndex = qtyString.indexOf('.');
+            return parseFloat(qtyString.slice(0, decimalIndex + desiredDecimals + 1));
         },
-        
+
         /**
         * rounds price to required precision
         * @param {float} price - price to round
@@ -832,7 +856,7 @@ let api = function Binance() {
         roundTicks: function (price, tickSize) {
             const formatter = new Intl.NumberFormat('en-US', { style: 'decimal', minimumFractionDigits: 0, maximumFractionDigits: 8 });
             const precision = formatter.format(tickSize).split('.')[1].length || 0;
-            if ( typeof price === 'string' ) price = parseFloat(price);
+            if (typeof price === 'string') price = parseFloat(price);
             return price.toFixed(precision);
         },
 
@@ -1128,7 +1152,7 @@ let api = function Binance() {
         },
 
         /**
-        * Cancels an order
+        * Gets the status of an order
         * @param {string} symbol - the symbol to check
         * @param {string} orderid - the orderid to check
         * @param {function} callback - the callback function
@@ -1200,6 +1224,42 @@ let api = function Binance() {
         depth: function (symbol, callback, limit = 100) {
             publicRequest(base + 'v1/depth', { symbol: symbol, limit: limit }, function (error, data) {
                 return callback.call(this, error, depthData(data), symbol);
+            });
+        },
+
+        /**
+        * Gets the average prices of a given symbol
+        * @param {string} symbol - the symbol
+        * @param {function} callback - the callback function
+        * @return {undefined}
+        */
+        avgPrice: function (symbol, callback = false) {
+            let socksproxy = process.env.socks_proxy || false;
+
+            let opt = {
+                url: base + 'v3/avgPrice?symbol=' + symbol,
+                timeout: Binance.options.recvWindow
+            };
+
+            if (socksproxy !== false) {
+                socksproxy = proxyReplacewithIp(socksproxy);
+                if (Binance.options.verbose) Binance.options.log('using socks proxy server ' + socksproxy);
+                opt.agentClass = SocksProxyAgent;
+                opt.agentOptions = {
+                    protocol: parseProxy(socksproxy)[0],
+                    host: parseProxy(socksproxy)[1],
+                    port: parseProxy(socksproxy)[2]
+                }
+            }
+
+            request(opt, function (error, response, body) {
+                if (!callback) return;
+
+                if (error) return callback(error);
+
+                if (response && response.statusCode !== 200) return callback(response);
+
+                if (callback) return callback(null, priceData(JSON.parse(body)));
             });
         },
 
@@ -1379,7 +1439,7 @@ let api = function Binance() {
         * @return {undefined}
         */
         tradeFee: function (callback, symbol = false) {
-            let params = symbol ? {symbol:symbol} : {};
+            let params = symbol ? { symbol: symbol } : {};
             signedRequest(wapi + 'v3/tradeFee.html', params, callback);
         },
 
@@ -1703,7 +1763,7 @@ let api = function Binance() {
                         let context = Binance.depthCacheContext[symbol];
                         context.endpointId = endpointId;
                     }
-                }
+                };
 
                 let handleDepthStreamData = function (depth) {
                     let symbol = depth.s;
@@ -1789,6 +1849,29 @@ let api = function Binance() {
             },
 
             /**
+             * Websocket staggered depth cache
+             * @param {array/string} symbols - an array of symbols to query
+             * @param {function} callback - callback function
+             * @param {int} limit - the number of entries
+             * @param {int} stagger - ms between each depth cache
+             * @return {Promise} the websocket endpoint
+             */
+            depthCacheStaggered: function (symbols, callback, limit = 100, stagger = 200) {
+                if (!Array.isArray(symbols)) symbols = [symbols];
+                let chain = null;
+
+                symbols.forEach(symbol => {
+                    let promise = () => new Promise(resolve => {
+                        this.depthCache(symbol, callback, limit);
+                        setTimeout(resolve, stagger);
+                    });
+                    chain = chain ? chain.then(promise) : promise();
+                });
+
+                return chain;
+            },
+
+            /**
             * Websocket aggregated trades
             * @param {array/string} symbols - an array or string of symbols to query
             * @param {function} callback - callback function
@@ -1843,11 +1926,12 @@ let api = function Binance() {
             * @param {array/string} symbols - an array or string of symbols to query
             * @param {string} interval - the time interval
             * @param {function} callback - callback function
+            * @param {int} limit - maximum results, no more than 1000
             * @return {string} the websocket endpoint
             */
-            chart: function chart(symbols, interval, callback) {
+            chart: function chart(symbols, interval, callback, limit = 500) {
                 let reconnect = function () {
-                    if (Binance.options.reconnect) chart(symbols, interval, callback);
+                    if (Binance.options.reconnect) chart(symbols, interval, callback, limit);
                 };
 
                 let symbolChartInit = function (symbol) {
@@ -1875,8 +1959,8 @@ let api = function Binance() {
                     }
                 };
 
-                let getSymbolKlineSnapshot = function (symbol) {
-                    publicRequest(base + 'v1/klines', { symbol: symbol, interval: interval }, function (error, data) {
+                let getSymbolKlineSnapshot = function (symbol, limit = 500) {
+                    publicRequest(base + 'v1/klines', { symbol: symbol, interval: interval, limit: limit }, function (error, data) {
                         klineData(symbol, interval, data);
                         //Binance.options.log('/klines at ' + Binance.info[symbol][interval].timestamp);
                         if (typeof Binance.klineQueue[symbol][interval] !== 'undefined') {
@@ -1895,12 +1979,12 @@ let api = function Binance() {
                         return symbol.toLowerCase() + '@kline_' + interval;
                     });
                     subscription = subscribeCombined(streams, handleKlineStreamData, reconnect);
-                    symbols.forEach(getSymbolKlineSnapshot);
+                    symbols.forEach(element => getSymbolKlineSnapshot(element, limit));
                 } else {
                     let symbol = symbols;
                     symbolChartInit(symbol);
                     subscription = subscribe(symbol.toLowerCase() + '@kline_' + interval, handleKlineStreamData, reconnect);
-                    getSymbolKlineSnapshot(symbol);
+                    getSymbolKlineSnapshot(symbol, limit);
                 }
                 return subscription.endpoint;
             },
