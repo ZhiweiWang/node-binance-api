@@ -85,17 +85,18 @@ let api = function Binance() {
     }
 
     const addProxy = opt => {
-        let socksproxy = process.env.socks_proxy || false;
-        if (socksproxy === false) return opt;
-        socksproxy = proxyReplacewithIp(socksproxy);
-
-        if (Binance.options.verbose) Binance.options.log('using socks proxy server ' + socksproxy);
-
-        opt.agentClass = SocksProxyAgent;
-        opt.agentOptions = {
-            protocol: parseProxy(socksproxy)[0],
-            host: parseProxy(socksproxy)[1],
-            port: parseProxy(socksproxy)[2]
+        let proxy = Binance.options.proxy
+            ? `http://${
+                Binance.options.proxy.auth
+                    ? Binance.options.proxy.auth.username +
+                    ':' +
+                    Binance.options.proxy.auth.password +
+                    '@'
+                    : ''
+                }${Binance.options.proxy.host}:${Binance.options.proxy.port}`
+            : '';
+        if (proxy) {
+            opt.proxy = proxy;
         }
         return opt;
     }
@@ -203,7 +204,7 @@ let api = function Binance() {
         if (!Binance.options.APISECRET) throw Error('signedRequest: Invalid API Secret');
         data.timestamp = new Date().getTime() + Binance.info.timeOffset;
         if (typeof data.recvWindow === 'undefined') data.recvWindow = Binance.options.recvWindow;
-        let query = Object.keys(data).reduce(function (a, k) {
+        let query = method === 'POST' && data.name === 'API Withdraw' ? '' : Object.keys(data).reduce(function (a, k) {
             a.push(k + '=' + encodeURIComponent(data[k]));
             return a;
         }, []).join('&');
@@ -1234,25 +1235,12 @@ let api = function Binance() {
         * @return {undefined}
         */
         avgPrice: function (symbol, callback = false) {
-            let socksproxy = process.env.socks_proxy || false;
-
             let opt = {
                 url: base + 'v3/avgPrice?symbol=' + symbol,
                 timeout: Binance.options.recvWindow
             };
 
-            if (socksproxy !== false) {
-                socksproxy = proxyReplacewithIp(socksproxy);
-                if (Binance.options.verbose) Binance.options.log('using socks proxy server ' + socksproxy);
-                opt.agentClass = SocksProxyAgent;
-                opt.agentOptions = {
-                    protocol: parseProxy(socksproxy)[0],
-                    host: parseProxy(socksproxy)[1],
-                    port: parseProxy(socksproxy)[2]
-                }
-            }
-
-            request(opt, function (error, response, body) {
+            request(addProxy(opt), function (error, response, body) {
                 if (!callback) return;
 
                 if (error) return callback(error);
@@ -1273,25 +1261,12 @@ let api = function Binance() {
             const params = typeof symbol === 'string' ? '?symbol=' + symbol : '';
             if (typeof symbol === 'function') callback = symbol; // backwards compatibility
 
-            let socksproxy = process.env.socks_proxy || false;
-
             let opt = {
                 url: base + 'v3/ticker/price' + params,
                 timeout: Binance.options.recvWindow
             };
 
-            if (socksproxy !== false) {
-                socksproxy = proxyReplacewithIp(socksproxy);
-                if (Binance.options.verbose) Binance.options.log('using socks proxy server ' + socksproxy);
-                opt.agentClass = SocksProxyAgent;
-                opt.agentOptions = {
-                    protocol: parseProxy(socksproxy)[0],
-                    host: parseProxy(socksproxy)[1],
-                    port: parseProxy(socksproxy)[2]
-                }
-            }
-
-            request(opt, function (error, response, body) {
+            request(addProxy(opt), function (error, response, body) {
                 if (!callback) return;
 
                 if (error) return callback(error);
@@ -1312,25 +1287,12 @@ let api = function Binance() {
             const params = typeof symbol === 'string' ? '?symbol=' + symbol : '';
             if (typeof symbol === 'function') callback = symbol; // backwards compatibility
 
-            let socksproxy = process.env.socks_proxy || false;
-
             let opt = {
                 url: base + 'v3/ticker/bookTicker' + params,
                 timeout: Binance.options.recvWindow
             };
 
-            if (socksproxy !== false) {
-                socksproxy = proxyReplacewithIp(socksproxy);
-                if (Binance.options.verbose) Binance.options.log('using socks proxy server ' + socksproxy);
-                opt.agentClass = SocksProxyAgent;
-                opt.agentOptions = {
-                    protocol: parseProxy(socksproxy)[0],
-                    host: parseProxy(socksproxy)[1],
-                    port: parseProxy(socksproxy)[2]
-                }
-            }
-
-            request(opt, function (error, response, body) {
+            request(addProxy(opt), function (error, response, body) {
                 if (!callback) return;
 
                 if (error) return callback(error);
@@ -1365,7 +1327,14 @@ let api = function Binance() {
         exchangeInfo: function (callback) {
             publicRequest(base + 'v1/exchangeInfo', {}, callback);
         },
-
+        /**
+        * Gets the dust log for user
+        * @param {function} callback - the callback function
+        * @return {undefined}
+        */
+        dustLog: function (callback) {
+          signedRequest(wapi + '/v3/userAssetDribbletLog.html', {}, callback);
+        },
         /**
         * Gets the the system status
         * @param {function} callback - the callback function
